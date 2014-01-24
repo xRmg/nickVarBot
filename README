@@ -1,0 +1,26 @@
+IRC nickname variable keeper bot.
+
+In nerd oriented channels we sometimes remark "user.awesomeness++" to indicate approval.
+This small IRC bot will maintain these variables on a channel.user basis and keep the 10 most recently used.
+Old vars are removed on a LRU scheme.
+
+Arguments
+%s <server> <port> <channel> <botname>
+
+Adding a variable:
+Mentioning a user with a var and any operation creates the variable.
+
+Modification of a variable:
+Any of these operations works user.variable++, --, +=%d, -=%d, =
+
+Removal of a variable:
+user.variable=NULL
+
+listing variables:
+user.*
+
+Variables are stored in .nickVarBot/varstate.txt:
+format TBD
+
+Auth file:
+format TBD
