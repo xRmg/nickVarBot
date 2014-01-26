@@ -317,7 +317,6 @@ int main() {
                                         varptr++;
                                     while(isalnum(*(varptr+1)));
                                     strncpy(currvar, dotptr+1, varptr - dotptr);
-                                    printf("currvar %s strlen %d\n", currvar, strlen(currvar));
 
                                     for(j = 0; j < MAXVARCOUNT; j++)
                                     {
