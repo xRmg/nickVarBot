@@ -12,6 +12,8 @@
 #define MAXVARNAMESIZE      32
 #define MAXVARCOUNT         10
 
+#define STRTOKDELIMS        " \n\r"
+
 // nickname variable data
 typedef struct
 {

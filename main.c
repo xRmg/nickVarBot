@@ -151,17 +151,19 @@ int main() {
                             target = user;
                         printf("[from: %s] [reply-with: %s] [where: %s] [reply-to: %s] %s", user, command, where, target, message);
 
+
                         char messagebuf[512];
                         char *token;
                         strncpy(messagebuf, message, sizeof(messagebuf));
-                        token = strtok(messagebuf," ");
+                        token = strtok(messagebuf, STRTOKDELIMS);
                         if(!strncmp(token, "!help", 4))
                         {
-                            raw("PRIVMSG %s : valid commands !varlist, !varsave, !vardel\r\n", target, user);
+                            raw("PRIVMSG %s : valid commands !varlist, !varsave, !vardel, more help? Sourcecode\r\n", target, user);
                         }
                         // list functions
                         else if(!strncmp(token, "!varlist", 8))
                         {
+                            char *nicktoken = strtok(NULL, STRTOKDELIMS);
                             int nickcount = 0;
                             // list all nickname variables
                             for(j = 0; j < MAXVARCOUNT; j++)
@@ -169,26 +171,83 @@ int main() {
                                 if(strlen(currentnickvars[j].name) != 0)
                                 {
                                     nickcount++;
-                                    raw("PRIVMSG %s :nick %s present\r\n",
-                                                target,
-                                                currentnickvars[j].name
-                                    );
-                                    for(k = 0; k < MAXVARCOUNT; k++)
+                                    if(nicktoken != NULL)
                                     {
-                                        if(strlen(currentnickvars[j].namevars[k].name) != 0)
+                                        if(!strcmp(currentnickvars[j].name, nicktoken))
                                         {
-                                            raw("PRIVMSG %s :nick %s has variable %s=%d used %d times\r\n",
-                                                target,
-                                                currentnickvars[j].name,
-                                                currentnickvars[j].namevars[k].name,
-                                                currentnickvars[j].namevars[k].namevalue,
-                                                currentnickvars[j].namevars[k].nameused
-                                            );
+                                            for(k = 0; k < MAXVARCOUNT; k++)
+                                            {
+                                                if(strlen(currentnickvars[j].namevars[k].name) != 0)
+                                                {
+                                                    raw("PRIVMSG %s :nick %s has variable %s=%d used %d times\r\n",
+                                                        target,
+                                                        currentnickvars[j].name,
+                                                        currentnickvars[j].namevars[k].name,
+                                                        currentnickvars[j].namevars[k].namevalue,
+                                                        currentnickvars[j].namevars[k].nameused
+                                                    );
+                                                }
+                                            }
+                                            break;
                                         }
+                                    }
+                                    else
+                                    {
+                                    raw("PRIVMSG %s :nick %s \r\n",
+                                        target,
+                                        currentnickvars[j].name
+                                    );
                                     }
                                 }
                             }
-                            raw("PRIVMSG %s :nickcount is %d\r\n", target, nickcount);
+                            if(nickcount == 0)
+                            {
+                                raw("PRIVMSG %s :nickcount is %d\r\n", target, nickcount);
+                            }
+                        }
+                        else if(!strncmp(token, "!vardel", 7))
+                        {
+                            char *nicktoken = strtok(NULL, STRTOKDELIMS);
+                            char *vartoken = strtok(NULL, STRTOKDELIMS);
+                            if(nicktoken != NULL)
+                            {
+                                for(j = 0; j < MAXVARCOUNT; j++)
+                                {
+                                    if(strlen(currentnickvars[j].name) != 0)
+                                    {
+                                        if(!strcmp(currentnickvars[j].name, nicktoken))
+                                        {
+                                            if(vartoken != NULL)
+                                            {
+                                                for(k = 0; k < MAXVARCOUNT; k++)
+                                                {
+                                                    if(!strcmp(currentnickvars[j].namevars[k].name, vartoken))
+                                                    {
+                                                        raw("PRIVMSG %s :clearing var %s from nick %s\r\n", target, vartoken, nicktoken);
+                                                        memset(&currentnickvars[j].namevars[k], 0, sizeof currentnickvars[j].namevars[k]);
+                                                        break;
+                                                    }
+                                                }
+                                                if(k == MAXVARCOUNT)
+                                                {
+                                                    raw("PRIVMSG %s :not found var %s from nick %s\r\n", target, vartoken, nicktoken);
+                                                    break;
+                                                }
+                                            }
+                                            else
+                                            {
+                                                raw("PRIVMSG %s :clearing nick %s\r\n", target, nicktoken);
+                                                memset(&currentnickvars[j], 0, sizeof currentnickvars[j]);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                if(j == MAXVARCOUNT)
+                                {
+                                    raw("PRIVMSG %s :not found %s\r\n", target, token);
+                                }
+                            }
                         }
                         else if(!strncmp(token, "!varsave", 8))
                         {
@@ -209,6 +268,7 @@ int main() {
                                     nickvarNick *currentnickentry = NULL;
                                     nickvarVar *currentvarentry = NULL;
                                     memset(currnick, 0, sizeof currnick);
+                                    memset(currnick, 0, sizeof currvar);
 
                                     do
                                         nickptr--;
@@ -272,10 +332,30 @@ int main() {
                                         }
                                         else
                                         {
-                                            printf("PRIVMSG %s : cant add var %s, full!\r\n", target, currvar);
                                             raw("PRIVMSG %s : cant add var %s, full!\r\n", target, currvar);
                                             continue;
                                         }
+                                    }
+
+                                    varptr++;
+
+                                    if(*(varptr) == '+' && *(varptr+1) == '+')
+                                    {
+                                        currentvarentry->namevalue++;
+                                        currentvarentry->nameused++;
+                                        raw("PRIVMSG %s : nick %s var %s is now %d\r\n", target,
+                                            currentnickentry->name,
+                                            currentvarentry->name,
+                                            currentvarentry->namevalue);
+                                    }
+                                    else if(*(varptr) == '-' && *(varptr+1) == '-')
+                                    {
+                                        currentvarentry->namevalue--;
+                                        currentvarentry->nameused++;
+                                        raw("PRIVMSG %s : nick %s var %s is now %d\r\n", target,
+                                            currentnickentry->name,
+                                            currentvarentry->name,
+                                            currentvarentry->namevalue);
                                     }
                                 }
                             }
