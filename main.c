@@ -175,10 +175,12 @@ int main() {
                                     {
                                         if(!strcmp(currentnickvars[j].name, nicktoken))
                                         {
+                                            int varcount = 0;
                                             for(k = 0; k < MAXVARCOUNT; k++)
                                             {
                                                 if(strlen(currentnickvars[j].namevars[k].name) != 0)
                                                 {
+                                                    varcount++;
                                                     raw("PRIVMSG %s :nick %s has variable %s=%d used %d times\r\n",
                                                         target,
                                                         currentnickvars[j].name,
@@ -188,6 +190,10 @@ int main() {
                                                     );
                                                 }
                                             }
+                                            if(varcount == 0)
+                                            {
+                                                raw("PRIVMSG %s :nick %s has no vars\r\n", target, currentnickvars[j].name);
+                                            }
                                             break;
                                         }
                                     }
@@ -195,14 +201,17 @@ int main() {
                                     {
                                     raw("PRIVMSG %s :nick %s \r\n",
                                         target,
-                                        currentnickvars[j].name
-                                    );
+                                        currentnickvars[j].name);
                                     }
                                 }
                             }
                             if(nickcount == 0)
                             {
                                 raw("PRIVMSG %s :nickcount is %d\r\n", target, nickcount);
+                            }
+                            else if((j == MAXVARCOUNT ) && (nicktoken != NULL))
+                            {
+                                raw("PRIVMSG %s : unknown nick %s \r\n", target, nicktoken);
                             }
                         }
                         else if(!strncmp(token, "!vardel", 7))
@@ -243,9 +252,10 @@ int main() {
                                         }
                                     }
                                 }
-                                if(j == MAXVARCOUNT)
+                                // vartoken is checked to supress this error, it will emit during var delete
+                                if((j == MAXVARCOUNT) && (vartoken == NULL))
                                 {
-                                    raw("PRIVMSG %s :not found %s\r\n", target, token);
+                                    raw("PRIVMSG %s :not found %s\r\n", target, nicktoken);
                                 }
                             }
                         }
