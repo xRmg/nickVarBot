@@ -278,7 +278,7 @@ int main() {
                                     nickvarNick *currentnickentry = NULL;
                                     nickvarVar *currentvarentry = NULL;
                                     memset(currnick, 0, sizeof currnick);
-                                    memset(currnick, 0, sizeof currvar);
+                                    memset(currvar, 0, sizeof currvar);
 
                                     do
                                         nickptr--;
