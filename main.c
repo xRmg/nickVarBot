@@ -136,7 +136,23 @@ int main() {
                         else
                             target = user;
                         printf("[from: %s] [reply-with: %s] [where: %s] [reply-to: %s] %s", user, command, where, target, message);
-                        // here the monitoring magic happens
+
+                        char messagebuf[512];
+                        char *token;
+                        strncpy(messagebuf, message, sizeof(messagebuf));
+                        token = strtok(messagebuf," ");
+                        // message emitted from channel
+                        if(target[0] == '#')
+                        {
+                            if(!strncmp(token, "!hey", 4))
+                            {
+                                raw("PRIVMSG %s :hey yourself %s\r\n", target, user);
+                            }
+                        }
+                        else
+                        {
+
+                        }
                     }
                 }
             }
