@@ -5,9 +5,26 @@
 #include <ctype.h>
 #include <netdb.h>
 #include <stdarg.h>
-#include "./inih/ini.h"
+#include <regex.h>
+#include <time.h>
+#include <unistd.h>
+#include "./lib/inih/ini.h"
 
 #include "nickVarBot.h"
+#define RX_BUFFER 1024
+
+const char *irc_cmd_ping = "PING";
+const char *irc_cmd_connected = "001";
+const char *irc_cmd_privmsg = "PRIVMSG";
+const char *irc_cmd_notice = "NOTICE";
+
+void mod_irc_join_channel(const char *channel);
+void mod_auth_authenticate(const char *auth, const char *postAuthMode );
+void mod_url_parse(char *user,char *command,char *where,char *target,char *message);
+
+int conn;
+char sbuf[RX_BUFFER];
+nickvarNick currentnickvars[MAXVARCOUNT];
 
 static int config_handler(void* cfg, const char* section,  const char* name, const char* value)
 {
@@ -30,11 +47,11 @@ static int config_handler(void* cfg, const char* section,  const char* name, con
 	}
 	else if (MATCH("irc","auth"))
 	{
-	    pconfig->auth = strdup(value);
+		pconfig->auth = strdup(value);
 	}
 	else if (MATCH("irc","postAuthMode"))
 	{
-	    pconfig->postAuthMode = strdup(value);
+		pconfig->postAuthMode = strdup(value);
 	}
 	else
 	{
@@ -43,338 +60,198 @@ static int config_handler(void* cfg, const char* section,  const char* name, con
 	return 1;
 }
 
-int conn;
-char sbuf[512];
-nickvarNick currentnickvars[MAXVARCOUNT];
-
-void raw(char *fmt, ...) {
-    // TODO flood protection
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(sbuf, 512, fmt, ap);
-    va_end(ap);
-    printf("<< %s", sbuf);
-    write(conn, sbuf, strlen(sbuf));
+void raw(char *fmt, ...)
+{
+	// TODO flood protection
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(sbuf, RX_BUFFER, fmt, ap);
+	va_end(ap);
+	printf("<< %s", sbuf);
+	write(conn, sbuf, strlen(sbuf));
 }
 
-int main() {
-    nickVarBotState config;
-    config.botIrcState = disconnected;
+int main()
+{
+	int status;
+	nickVarBotState config;
 
-    char *user, *command, *where, *message, *sep, *target;
-    int i, j, k, l, sl, o = -1, start, wordcount;
-    char buf[513];
-    struct addrinfo hints, *res;
-    // TODO create a .nickVarBot dir for config and state storage
-    memset(currentnickvars, 0, sizeof currentnickvars);
-    // TODO load current vars from config file
+	char *user, *command, *where, *message, *sep, *target;
+	int i, j, k, l, sl, o = -1, start, wordcount;
+	char buf[RX_BUFFER];
+	
+	
+	struct addrinfo hints, *res;
 
-    if(ini_parse("nickvarbot.cfg" , config_handler, &config) < 0)
-    {
-        printf("Can't load 'nickvarbot.cfg'\r\n");
-        return 1;
-    }
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    getaddrinfo(config.server, config.port, &hints, &res);
-    conn = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    connect(conn, res->ai_addr, res->ai_addrlen);
-
-    raw("USER %s 0 0 :%s\r\n", config.nick, config.nick);
-    raw("NICK %s\r\n", config.nick);
-
-    while ((sl = read(conn, sbuf, 512)))
-    {
-        for (i = 0; i < sl; i++)
-        {
-            o++;
-            buf[o] = sbuf[i];
-            if ((i > 0 && sbuf[i] == '\n' && sbuf[i - 1] == '\r') || o == 512)
-            {
-                buf[o + 1] = '\0';
-                l = o;
-                o = -1;
-
-                printf(">> %s", buf);
-
-                if (!strncmp(buf, "PING", 4))
-                {
-                    buf[1] = 'O';
-                    raw(buf);
-                }
-                else if (buf[0] == ':')
-                {
-                    wordcount = 0;
-                    user = command = where = message = NULL;
-                    for (j = 1; j < l; j++) {
-                        if (buf[j] == ' ') {
-                            buf[j] = '\0';
-                            wordcount++;
-                            switch(wordcount) {
-                                case 1: user = buf + 1; break;
-                                case 2: command = buf + start; break;
-                                case 3: where = buf + start; break;
-                            }
-                            if (j == l - 1)
-                                continue;
-                            start = j + 1;
-                        } else if (buf[j] == ':' && wordcount == 3) {
-                            if (j < l - 1) message = buf + j + 1;
-                                break;
-                        }
-                    }
-
-                    if (wordcount < 2)
-                        continue;
-
-                    // we are connected (timestamp 001), spam everything we got!
-                    if  (!strncmp(command, "001", 3) && config.channel != NULL)
-                    {
-                        if(config.auth != NULL);
-                           raw("%s\r\n", config.auth);
-                        if(config.postAuthMode != NULL)
-                            raw("%s\r\n", config.postAuthMode);
-                        if(config.channel != NULL)
-                            raw("JOIN %s\r\n", config.channel);
-                    }
-                    // dissect all messages
-                    else if (!strncmp(command, "PRIVMSG", 7) || !strncmp(command, "NOTICE", 6))
-                    {
-                        if (where == NULL || message == NULL)
-                            continue;
-                        if ((sep = strchr(user, '!')) != NULL)
-                            user[sep - user] = '\0';
-                        if (where[0] == '#' || where[0] == '&' || where[0] == '+' || where[0] == '!')
-                            target = where;
-                        else
-                            target = user;
-                        printf("[from: %s] [reply-with: %s] [where: %s] [reply-to: %s] %s", user, command, where, target, message);
+	config.botIrcState = disconnected;
 
 
-                        char messagebuf[512];
-                        char *token;
-                        strncpy(messagebuf, message, sizeof(messagebuf));
-                        token = strtok(messagebuf, STRTOKDELIMS);
-                        if(!strncmp(token, "!help", 4))
-                        {
-                            raw("PRIVMSG %s : valid commands !varlist, !varsave, !vardel, more help? Sourcecode\r\n", target, user);
-                        }
-                        // list functions
-                        else if(!strncmp(token, "!varlist", 8))
-                        {
-                            char *nicktoken = strtok(NULL, STRTOKDELIMS);
-                            int nickcount = 0;
-                            // list all nickname variables
-                            for(j = 0; j < MAXVARCOUNT; j++)
-                            {
-                                if(strlen(currentnickvars[j].name) != 0)
-                                {
-                                    nickcount++;
-                                    if(nicktoken != NULL)
-                                    {
-                                        if(!strcmp(currentnickvars[j].name, nicktoken))
-                                        {
-                                            int varcount = 0;
-                                            for(k = 0; k < MAXVARCOUNT; k++)
-                                            {
-                                                if(strlen(currentnickvars[j].namevars[k].name) != 0)
-                                                {
-                                                    varcount++;
-                                                    raw("PRIVMSG %s :nick %s has variable %s=%d used %d times\r\n",
-                                                        target,
-                                                        currentnickvars[j].name,
-                                                        currentnickvars[j].namevars[k].name,
-                                                        currentnickvars[j].namevars[k].namevalue,
-                                                        currentnickvars[j].namevars[k].nameused
-                                                    );
-                                                }
-                                            }
-                                            if(varcount == 0)
-                                            {
-                                                raw("PRIVMSG %s :nick %s has no vars\r\n", target, currentnickvars[j].name);
-                                            }
-                                            break;
-                                        }
-                                    }
-                                    else
-                                    {
-                                    raw("PRIVMSG %s :nick %s \r\n",
-                                        target,
-                                        currentnickvars[j].name);
-                                    }
-                                }
-                            }
-                            if(nickcount == 0)
-                            {
-                                raw("PRIVMSG %s :nickcount is %d\r\n", target, nickcount);
-                            }
-                            else if((j == MAXVARCOUNT ) && (nicktoken != NULL))
-                            {
-                                raw("PRIVMSG %s : unknown nick %s \r\n", target, nicktoken);
-                            }
-                        }
-                        else if(!strncmp(token, "!vardel", 7))
-                        {
-                            char *nicktoken = strtok(NULL, STRTOKDELIMS);
-                            char *vartoken = strtok(NULL, STRTOKDELIMS);
-                            if(nicktoken != NULL)
-                            {
-                                for(j = 0; j < MAXVARCOUNT; j++)
-                                {
-                                    if(strlen(currentnickvars[j].name) != 0)
-                                    {
-                                        if(!strcmp(currentnickvars[j].name, nicktoken))
-                                        {
-                                            if(vartoken != NULL)
-                                            {
-                                                for(k = 0; k < MAXVARCOUNT; k++)
-                                                {
-                                                    if(!strcmp(currentnickvars[j].namevars[k].name, vartoken))
-                                                    {
-                                                        raw("PRIVMSG %s :clearing var %s from nick %s\r\n", target, vartoken, nicktoken);
-                                                        memset(&currentnickvars[j].namevars[k], 0, sizeof currentnickvars[j].namevars[k]);
-                                                        break;
-                                                    }
-                                                }
-                                                if(k == MAXVARCOUNT)
-                                                {
-                                                    raw("PRIVMSG %s :not found var %s from nick %s\r\n", target, vartoken, nicktoken);
-                                                    break;
-                                                }
-                                            }
-                                            else
-                                            {
-                                                raw("PRIVMSG %s :clearing nick %s\r\n", target, nicktoken);
-                                                memset(&currentnickvars[j], 0, sizeof currentnickvars[j]);
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                                // vartoken is checked to supress this error, it will emit during var delete
-                                if((j == MAXVARCOUNT) && (vartoken == NULL))
-                                {
-                                    raw("PRIVMSG %s :not found %s\r\n", target, nicktoken);
-                                }
-                            }
-                        }
-                        else if(!strncmp(token, "!varsave", 8))
-                        {
-                            // save all nickname variables
-                        }
-                        // parse all incoming lines
-                        else
-                        {
-                            char *dotptr = strchr(message, '.');
-                            if(dotptr != NULL)
-                            {
-                                if(isalnum(*(dotptr+1)) && isalnum(*(dotptr-1)))
-                                {
-                                    char *nickptr = dotptr;
-                                    char *varptr = dotptr;
-                                    char currnick[MAXVARNAMESIZE];
-                                    char currvar[MAXVARNAMESIZE];
-                                    nickvarNick *currentnickentry = NULL;
-                                    nickvarVar *currentvarentry = NULL;
-                                    memset(currnick, 0, sizeof currnick);
-                                    memset(currvar, 0, sizeof currvar);
+	// TODO create a .nickVarBot dir for config and state storage
+	memset(currentnickvars, 0, sizeof currentnickvars);
+	// TODO load current vars from config file
+	printf("Loading Config'\r\n");
+	if(ini_parse("nickvarbot.cfg" , config_handler, &config) < 0)
+	{
+		printf("Can't load 'nickvarbot.cfg'\r\n");
+		return 1;
+	}
+	printf("Loaded Config'\r\n");
+	memset(&hints, 0, sizeof hints);
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	getaddrinfo(config.server, config.port, &hints, &res);
+	conn = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+	printf("Connected 1'\r\n");
+	connect(conn, res->ai_addr, res->ai_addrlen);
+	printf("Connected'\r\n");
+	raw("USER %s 0 0 :%s\r\n", config.nick, config.nick);
+	raw("NICK %s\r\n", config.nick);
 
-                                    do
-                                        nickptr--;
-                                    while(isalnum(*(nickptr-1)));
-                                    strncpy(currnick, nickptr, dotptr - nickptr);
+	while ((sl = read(conn, sbuf, RX_BUFFER)))
+	{
+		for (i = 0; i < sl; i++)
+		{
+			o++;
+			buf[o] = sbuf[i];
+			if ((i > 0 && sbuf[i] == '\n' && sbuf[i - 1] == '\r') || o == RX_BUFFER)
+			{
+				buf[o + 1] = '\0';
+				l = o;
+				o = -1;
 
-                                    for(j = 0; j < MAXVARCOUNT; j++)
-                                    {
-                                        if(strlen(currentnickvars[j].name) != 0)
-                                        {
-                                            if(!strcmp(currentnickvars[j].name, currnick))
-                                            {
-                                                currentnickentry = &currentnickvars[j];
-                                                break;
-                                            }
-                                        }
-                                        else
-                                            // keep an empty entry for later
-                                            currentnickentry = &currentnickvars[j];
-                                    }
-                                    if(j == MAXVARCOUNT)
-                                    {
-                                        if(currentnickentry != NULL)
-                                        {
-                                            raw("PRIVMSG %s : adding nickname %s \r\n", target, currnick);
-                                            strncpy(currentnickentry->name, currnick, MAXVARNAMESIZE);
-                                        }
-                                        else
-                                        {
-                                            raw("PRIVMSG %s : cant add nickname %s, full! \r\n", target, currnick);
-                                            continue;
-                                        }
-                                    }
+				printf(">> %s", buf);
+				if (!strncmp(buf, irc_cmd_ping, strlen(irc_cmd_connected)))
+				{
+					buf[1] = 'O';
+					raw(buf);
+				}
+				else if (buf[0] == ':')
+				{
+					wordcount = 0;
+					user = command = where = message = NULL;
+					for (j = 1; j < l; j++)
+					{
+						if (buf[j] == ' ')
+						{
+							buf[j] = '\0';
+							wordcount++;
+							switch(wordcount)
+							{
+							case 1:
+								user = buf + 1;
+								break;
+							case 2:
+								command = buf + start;
+								break;
+							case 3:
+								where = buf + start;
+								break;
+							}
+							if (j == l - 1)
+								continue;
+							start = j + 1;
+						}
+						else if (buf[j] == ':' && wordcount == 3)
+						{
+							if (j < l - 1) message = buf + j + 1;
+							break;
+						}
+					}
 
-                                    do
-                                        varptr++;
-                                    while(isalnum(*(varptr+1)));
-                                    strncpy(currvar, dotptr+1, varptr - dotptr);
+					// we are connected (timestamp 001), spam everything we got!
+					if  (!strncmp(command, irc_cmd_connected, strlen(irc_cmd_connected)) && config.channel != NULL)
+					{
+						//Timestap is received
+						mod_auth_authenticate(config.auth, config.postAuthMode);
+						mod_irc_join_channel(config.channel);
 
-                                    for(j = 0; j < MAXVARCOUNT; j++)
-                                    {
-                                        if(strlen(currentnickentry->namevars[j].name) != 0)
-                                        {
-                                            if(!strcmp(currentnickentry->namevars[j].name, currvar))
-                                            {
-                                                currentvarentry = &currentnickentry->namevars[j];
-                                                break;
-                                            }
-                                        }
-                                        else
-                                            // keep an empty entry for later
-                                            currentvarentry = &currentnickentry->namevars[j];
-                                    }
-                                    if(j == MAXVARCOUNT)
-                                    {
-                                        if(currentvarentry != NULL)
-                                        {
-                                            raw("PRIVMSG %s : adding var %s \r\n", target, currvar);
-                                            strncpy(currentvarentry->name, currvar, MAXVARNAMESIZE);
-                                        }
-                                        else
-                                        {
-                                            raw("PRIVMSG %s : cant add var %s, full!\r\n", target, currvar);
-                                            continue;
-                                        }
-                                    }
+					}
+					// dissect all messages
+					else if (!strncmp(command, irc_cmd_privmsg, strlen(irc_cmd_privmsg)))
+					{
+						if ((sep = strchr(user, '!')) != NULL)
+							user[sep - user] = '\0';
+						if (where[0] == '#' || where[0] == '&' || where[0] == '+' || where[0] == '!')
+							target = where;
+						else
+							target = user;
+						printf("[from: %s] [reply-with: %s] [where: %s] [reply-to: %s] %s", user, command, where, target, message);
 
-                                    varptr++;
+						mod_url_parse(user,command,where,target,message);
+					}
+				}
+			}
+		}
+	}
 
-                                    if(*(varptr) == '+' && *(varptr+1) == '+')
-                                    {
-                                        currentvarentry->namevalue++;
-                                        currentvarentry->nameused++;
-                                        raw("PRIVMSG %s : nick %s var %s is now %d\r\n", target,
-                                            currentnickentry->name,
-                                            currentvarentry->name,
-                                            currentvarentry->namevalue);
-                                    }
-                                    else if(*(varptr) == '-' && *(varptr+1) == '-')
-                                    {
-                                        currentvarentry->namevalue--;
-                                        currentvarentry->nameused++;
-                                        raw("PRIVMSG %s : nick %s var %s is now %d\r\n", target,
-                                            currentnickentry->name,
-                                            currentvarentry->name,
-                                            currentvarentry->namevalue);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+	return 0;
 
-    return 0;
+}
 
+
+void mod_auth_authenticate(const char *auth, const char *postAuthMode )
+{
+	raw("%s\r\n", auth);
+	raw("%s\r\n", postAuthMode);
+}
+
+void mod_irc_join_channel(const char *channel)
+{
+	raw("JOIN %s\r\n", channel);
+}
+
+void mod_url_parse(char *user,char *command,char *where,char *target,char *message)
+{
+	regex_t regex;
+	int regexurl;
+	char buf_timeStamp[64];
+	time_t rawtime;
+	struct tm * timeinfo;
+	FILE *urllog_file;
+	FILE *wget_fp;
+	char path[1024];
+	char cmd[1024];
+
+
+	regexurl = regcomp(&regex, "http", 0);
+	if( regexurl )
+	{
+		fprintf(stderr, "Could not compile regex\n");
+		exit(1);
+	}
+
+	regexurl = regexec(&regex, message, 0, NULL, 0);
+	if( !regexurl )
+	{
+		urllog_file = fopen("urllog.txt","a+");
+		time(&rawtime);
+		timeinfo = localtime(&rawtime);
+		strftime(buf_timeStamp,80,"%d-%m-%Y %H:%M:%S",timeinfo);
+		printf("%s [%s]%s | %s", buf_timeStamp, where, user, message);
+		fprintf(urllog_file,"%s [%s]%s | %s", buf_timeStamp, where, user, message);
+		fclose(urllog_file);
+
+		sprintf(cmd, "wget -q -O - \"$@\" \"http://alienpro.be/urlTitleFromString.php?url=%s", message);
+		cmd[strlen(cmd)-2] = '\0';
+		sprintf(cmd, "%s\"", cmd);
+		printf("%s",cmd);
+
+
+		wget_fp = popen(cmd, "r");
+		wget_fp = popen(cmd, "r");
+		if (wget_fp == NULL)
+		{
+			printf("Failed to run command\n" );
+		}
+		/* Read the output a line at a time - output it. */
+		fgets(path, sizeof(path)-1, wget_fp);
+		if(strlen(path) > 3)
+		{
+			printf("\r\n%s\r\n", path);
+			raw("PRIVMSG %s :%s \r\n", target, path);
+			path[0] = '\0';
+
+		}
+		pclose(wget_fp);
+	}
 }

@@ -1,2 +1,5 @@
-open todo's:
-start parsing channel messages and find interesting "vars"
+Open TODO:
+
+1. Crashes when auth is commented out in config.
+2. Create functions / abstraction layer for messaging.
+
